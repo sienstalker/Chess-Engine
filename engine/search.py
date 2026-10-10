@@ -317,3 +317,69 @@ def find_best_move(board, depth=3, time_limit=None, use_pruning=True,
     searcher = Searcher(use_pruning=use_pruning, use_quiescence=use_quiescence,
                         use_tt=use_tt, time_limit=time_limit, stop_event=stop_event)
     return searcher.search(board, depth)
+
+def alpha_beta(board, depth, alpha, beta, allow_null_move=True, info=None):
+    if depth <= 0:
+        return quiescence_search(board, alpha, beta, info)
+    
+    if info is not None:
+        info['nodes'] += 1
+
+    in_check = board.is_check()
+
+    # 1. NULL MOVE PRUNING (NMP)
+    if allow_null_move and not in_check and depth >= 3:
+        R = 2 + (1 if depth > 6 else 0)
+        board.push_null_move() # Or pass turn depending on your board implementation
+        score = -alpha_beta(board, depth - 1 - R, -beta, -beta + 1, False, info)
+        board.pop_null_move()
+        if score >= beta:
+            return beta
+
+    moves = list(board.generate_legal_moves())
+    # TODO: Add move ordering here (PV-move, captures, killers)
+
+    best_score = -float('inf')
+    moves_searched = 0
+
+    for move in moves:
+        board.push(move)
+
+        # 2. CHECK EXTENSIONS
+        extension = 1 if board.is_check() else 0
+        current_depth = depth - 1 + extension
+
+        is_quiet = not board.is_capture(move) and not board.is_check()
+
+        # 3. LATE MOVE REDUCTIONS (LMR)
+        if depth >= 3 and moves_searched >= 4 and is_quiet:
+            reduction = 2 if moves_searched >= 8 else 1
+            reduced_depth = max(0, current_depth - reduction)
+
+            score = -alpha_beta(board, reduced_depth, -(alpha + 1), -alpha, True, info)
+            if score > alpha:
+                score = -alpha_beta(board, current_depth, -beta, -alpha, True, info)
+        else:
+            if moves_searched == 0:
+                score = -alpha_beta(board, current_depth, -beta, -alpha, True, info)
+            else:
+                score = -alpha_beta(board, current_depth, -(alpha + 1), -alpha, True, info)
+                if alpha < score < beta:
+                    score = -alpha_beta(board, current_depth, -beta, -alpha, True, info)
+
+        board.pop()
+        moves_searched += 1
+
+        if score > best_score:
+            best_score = score
+            if score > alpha:
+                alpha = score
+                if alpha >= beta:
+                    break
+
+    if len(moves) == 0:
+        if in_check:
+            return -99999 + info.get('ply', 0) # Checkmate score
+        return 0 # Stalemate
+
+    return best_score
